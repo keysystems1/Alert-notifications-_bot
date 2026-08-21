@@ -7,6 +7,7 @@ import threading, asyncio
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1537833593919901706
+ROLE_ID = 1538971924523253961 # رتبة اشعارات البثوث - بس البوت يمنشنها
 STREAMERS = ["hook","seagull","drb7h","f1aisal","fhlwy","peerless","imonkey_d","abo8alyy","abo_khrbaa","id7o","s5b","okb8","taf86","firas","aymnalsatam","osamah"]
 
 intents = discord.Intents.default()
@@ -15,7 +16,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 live_cache = {}
 
 async def get_kick_info(slug):
-    # نجرب 3 طرق - اذا وحدة فشلت نجرب الثانية
     urls = [
         f"https://kick.com/api/v2/channels/{slug}",
         f"https://kick.com/api/v1/channels/{slug}",
@@ -33,18 +33,11 @@ async def get_kick_info(slug):
                 async with s.get(url,timeout=10) as r:
                     if r.status==200:
                         data=await r.json()
-                        # طريقة v2
-                        ls = data.get("livestream") if "livestream" in data else data.get("livestream", data)
-                        if isinstance(data, dict) and data.get("id") and not data.get("livestream"):
-                            # هذا تشات روم - فيه is_live
-                            pass
-                        # اذا جاي من v1
                         if "user" in data or "livestream" in data:
                             ls = data.get("livestream")
                             last = data.get("last_broadcast") or {}
                             is_live = ls is not None
                             if not is_live and data.get("is_live"): is_live=True
-                            # اذا مافي ls بس فيه last
                             title = ""
                             if ls: title = ls.get("session_title") or ""
                             if not title and last.get("session_title"): title = last["session_title"]
@@ -64,24 +57,15 @@ async def get_kick_info(slug):
                                 "category_thumb": cat.get("thumbnail"),
                                 "thumbnail": thumb or data.get("thumbnail")
                             }
-                        # طريقة تشات روم
-                        if "chatters" in str(data) or "id" in data:
-                            # نجيب اللايف من endpoint ثاني
-                            continue
         except Exception as e:
             print(f"try {url} fail {e}")
             continue
-
-    # المحاولة الاخيرة - نفحص صفحة kick مباشرة
     try:
         async with aiohttp.ClientSession(headers=headers) as s:
             async with s.get(f"https://kick.com/{slug}",timeout=10) as r:
                 text = await r.text()
-                # لو فيه livestream في الصفحة
                 is_live = '"is_live":true' in text or '"livestream":{' in text and '"id":' in text
-                # اذا الصفحة فيها LIVE
                 if 'LIVE' in text[:5000] or is_live:
-                    # حاول تطلع العنوان
                     return {
                         "username": slug,
                         "profile_pic": None,
@@ -123,7 +107,7 @@ async def check_kick():
                 if info["thumbnail"]: embed.set_image(url=info["thumbnail"])
                 if info["category"]: embed.set_footer(text=info["category"])
                 try:
-                    await ch.send(content=f"@everyone 🟢 **{slug} فتح بث!**",embed=embed,view=KickView(slug))
+                    await ch.send(content=f"<@&{ROLE_ID}> 🟢 **{slug} فتح بث!**",embed=embed,view=KickView(slug))
                     print(f"SENT {slug}")
                 except Exception as e: print(e)
         elif not info["is_live"]:
@@ -143,7 +127,7 @@ async def clash(interaction:discord.Interaction,الرابط:str):
     await interaction.response.send_message(f"⏳ افحص `{slug}`...",ephemeral=True)
     info=await get_kick_info(slug)
     if not info:
-        return await interaction.followup.send(f"❌ Kick حاجب سيرفر Render - جرب بعد شوي او اكتب id7o بدون رابط",ephemeral=True)
+        return await interaction.followup.send(f"❌ Kick حاجب سيرفر Render - جرب بعد شوي",ephemeral=True)
     embed=discord.Embed(description=info['title'],color=0x53FC18 if info['is_live'] else 0xED4245)
     if info["thumbnail"]: embed.set_image(url=info["thumbnail"])
     await interaction.followup.send(f"**{slug}** - {'🔴 لايف' if info['is_live'] else '⚫️ اوفلاين'}",embed=embed,view=KickView(slug),ephemeral=True)
@@ -164,10 +148,10 @@ async def force_check(interaction:discord.Interaction):
                 embed=discord.Embed(description=info['title'],color=0x53FC18)
                 embed.set_author(name=f"{slug} LIVE!")
                 if info["thumbnail"]: embed.set_image(url=info["thumbnail"])
-                await ch.send(content=f"🟢 **{slug}** لايف!",embed=embed,view=KickView(slug))
+                await ch.send(content=f"<@&{ROLE_ID}> 🟢 **{slug}** لايف!",embed=embed,view=KickView(slug))
                 sent.append(slug)
                 live_cache[slug]=True
-    await interaction.followup.send(f"✅ ارسلت {len(sent)}: {', '.join(sent) if sent else '0 - Kick حاجب ال API جرب بعد دقيقتين'}",ephemeral=True)
+    await interaction.followup.send(f"✅ ارسلت {len(sent)}: {', '.join(sent) if sent else '0'}",ephemeral=True)
 
 app=Flask('')
 @app.route('/')
