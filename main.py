@@ -7,7 +7,7 @@ import threading, asyncio
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1537833593919901706
-STREAMERS = ["hook","seagull","drb7h","f1aisal","fhlwy","peerless","imonkey_d","abo8alyy","abo_khrbaa","id7o","s5b","okb8","taf86","firas"]
+STREAMERS = ["hook","seagull","drb7h","f1aisal","fhlwy","peerless","imonkey_d","abo8alyy","abo_khrbaa","id7o","s5b","okb8","taf86","firas","aymnalsatam","osamah"]
 
 intents = discord.Intents.default()
 intents.guilds = True
