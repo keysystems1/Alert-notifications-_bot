@@ -6,9 +6,14 @@ from flask import Flask
 import threading, asyncio
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = 1537833593919901706
-ROLE_ID = 1538971924523253961 # رتبة اشعارات البثوث - بس البوت يمنشنها
-STREAMERS = ["hook","seagull","drb7h","f1aisal","fhlwy","peerless","imonkey_d","abo8alyy","abo_khrbaa","id7o","s5b","okb8","taf86","firas","aymnalsatam","osamah"]
+
+ROOM_RT = 1537833593919901706
+ROOM_MT = 1540466423854268537
+ROLE_ID = 1538971924523253961
+
+STREAMERS_RT = ["hook","seagull","drb7h","f1aisal","fhlwy","peerless","imonkey_d","abo8alyy","abo_khrbaa","id7o","s5b","okb8","taf86","aymnalsatam"]
+STREAMERS_MT = ["firas","osamah","abokhaled_sa","abokyan","abdulrhman","majah92","brof2","tmnaa","7omah","sxb","abuswe7l"]
+ALL_STREAMERS = STREAMERS_RT + STREAMERS_MT
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -87,19 +92,20 @@ class KickView(discord.ui.View):
 @tasks.loop(seconds=30)
 async def check_kick():
     print("--- CHECKING ---")
-    for slug in STREAMERS:
+    for slug in ALL_STREAMERS:
         info = await get_kick_info(slug)
         if not info:
             print(f"{slug}: API blocked")
             continue
         was = live_cache.get(slug, False)
-        print(f"{slug}: live={info['is_live']} was={was}")
+        target_room = ROOM_RT if slug in STREAMERS_RT else ROOM_MT
+        print(f"{slug}: live={info['is_live']} was={was} -> {target_room}")
         if info["is_live"] and not was:
             live_cache[slug]=True
-            ch = bot.get_channel(CHANNEL_ID)
+            ch = bot.get_channel(target_room)
             if not ch:
                 for g in bot.guilds:
-                    ch=g.get_channel(CHANNEL_ID)
+                    ch=g.get_channel(target_room)
                     if ch: break
             if ch:
                 embed=discord.Embed(description=f"{info['title']}",color=0x53FC18)
@@ -109,6 +115,7 @@ async def check_kick():
                 try:
                     await ch.send(content=f"<@&{ROLE_ID}> 🟢 **{slug} فتح بث!**",embed=embed,view=KickView(slug))
                     print(f"SENT {slug}")
+                    await asyncio.sleep(2)
                 except Exception as e: print(e)
         elif not info["is_live"]:
             live_cache[slug]=False
@@ -134,24 +141,22 @@ async def clash(interaction:discord.Interaction,الرابط:str):
 
 @bot.tree.command(name="فحص_الان",description="ارسل اللي فاتحين غصب")
 async def force_check(interaction:discord.Interaction):
-    await interaction.response.send_message("⏳ افحص...",ephemeral=True)
-    sent=[]
-    for slug in STREAMERS:
+    await interaction.response.send_message("⏳ افحص... كل واحد برسالة لحالها",ephemeral=True)
+    sent_rt=[]; sent_mt=[]
+    for slug in ALL_STREAMERS:
         info=await get_kick_info(slug)
         if info and info['is_live']:
-            ch=bot.get_channel(CHANNEL_ID)
-            if not ch:
-                for g in bot.guilds:
-                    ch=g.get_channel(CHANNEL_ID)
-                    if ch: break
+            target_room = ROOM_RT if slug in STREAMERS_RT else ROOM_MT
+            ch=bot.get_channel(target_room) or next((g.get_channel(target_room) for g in bot.guilds if g.get_channel(target_room)), None)
             if ch:
                 embed=discord.Embed(description=info['title'],color=0x53FC18)
                 embed.set_author(name=f"{slug} LIVE!")
                 if info["thumbnail"]: embed.set_image(url=info["thumbnail"])
                 await ch.send(content=f"<@&{ROLE_ID}> 🟢 **{slug}** لايف!",embed=embed,view=KickView(slug))
-                sent.append(slug)
+                (sent_rt if slug in STREAMERS_RT else sent_mt).append(slug)
                 live_cache[slug]=True
-    await interaction.followup.send(f"✅ ارسلت {len(sent)}: {', '.join(sent) if sent else '0'}",ephemeral=True)
+                await asyncio.sleep(2)
+    await interaction.followup.send(f"✅ RT ({len(sent_rt)}): {', '.join(sent_rt) or '0'}\nMT ({len(sent_mt)}): {', '.join(sent_mt) or '0'}",ephemeral=True)
 
 app=Flask('')
 @app.route('/')
