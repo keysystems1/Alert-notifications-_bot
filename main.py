@@ -15,6 +15,15 @@ STREAMERS_RT = ["hook","seagull","drb7h","f1aisal","fhlwy","peerless","imonkey_d
 STREAMERS_MT = ["firas","osamah","abokhaled_sa","abokyan","abdulrhman","majah92","brof2","tmnaa","7omah","sxb","abuswe7l"]
 ALL_STREAMERS = STREAMERS_RT + STREAMERS_MT
 
+# ===== بس رول الاونر يشوف الاوامر =====
+OWNER_ROLE_ID = 1537833274875838515
+
+def only_owner_role(interaction: discord.Interaction):
+    if isinstance(interaction.user, discord.Member):
+        return any(r.id == OWNER_ROLE_ID for r in interaction.user.roles)
+    return False
+# =====================================
+
 intents = discord.Intents.default()
 intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -127,8 +136,10 @@ async def on_ready():
     except: pass
     if not check_kick.is_running(): check_kick.start()
 
-@bot.tree.command(name="كلاش",description="فحص")
+# ===== هنا التعديل - بس رول الاونر =====
+@bot.tree.command(name="كلاش",description="للاونر فقط - رول الاونر", default_permissions=discord.Permissions(administrator=True))
 @app_commands.describe(الرابط="https://kick.com/id7o")
+@app_commands.check(only_owner_role)
 async def clash(interaction:discord.Interaction,الرابط:str):
     slug=الرابط.split("kick.com/")[-1].split("/")[0].lower().strip()
     await interaction.response.send_message(f"⏳ افحص `{slug}`...",ephemeral=True)
@@ -139,7 +150,8 @@ async def clash(interaction:discord.Interaction,الرابط:str):
     if info["thumbnail"]: embed.set_image(url=info["thumbnail"])
     await interaction.followup.send(f"**{slug}** - {'🔴 لايف' if info['is_live'] else '⚫️ اوفلاين'}",embed=embed,view=KickView(slug),ephemeral=True)
 
-@bot.tree.command(name="فحص_الان",description="ارسل اللي فاتحين غصب")
+@bot.tree.command(name="فحص_الان",description="للاونر فقط - رول الاونر", default_permissions=discord.Permissions(administrator=True))
+@app_commands.check(only_owner_role)
 async def force_check(interaction:discord.Interaction):
     await interaction.response.send_message("⏳ افحص... كل واحد برسالة لحالها",ephemeral=True)
     sent_rt=[]; sent_mt=[]
@@ -157,6 +169,15 @@ async def force_check(interaction:discord.Interaction):
                 live_cache[slug]=True
                 await asyncio.sleep(2)
     await interaction.followup.send(f"✅ RT ({len(sent_rt)}): {', '.join(sent_rt) or '0'}\nMT ({len(sent_mt)}): {', '.join(sent_mt) or '0'}",ephemeral=True)
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CheckFailure):
+        try:
+            await interaction.response.send_message("❌ هذا الامر بس لرول الاونر <@&1537833274875838515>", ephemeral=True)
+        except:
+            pass
+# =====================================
 
 app=Flask('')
 @app.route('/')
