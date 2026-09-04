@@ -30,15 +30,34 @@ class StreamView(discord.ui.View):
         emoji = "🟢" if is_live else "🎥"
         self.add_item(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url, emoji=emoji))
 
-# هذا نفس كودك بس صلحت الـ API
 async def get_kick(slug):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
         async with aiohttp.ClientSession(headers=headers) as s:
             async with s.get(f"https://kick.com/api/v2/channels/{slug}", timeout=10) as r:
                 if r.status==200:
                     d=await r.json()
-                    return {"is_live": d.get("livestream") is not None}
+                    livestream = d.get("livestream")
+                    if livestream:
+                        # العنوان
+                        title = livestream.get("session_title") or d.get("channel", {}).get("name") or "بث مباشر"
+                        # صورة البث - اهم شي
+                        thumb = None
+                        th = livestream.get("thumbnail")
+                        if isinstance(th, dict):
+                            thumb = th.get("url") or th.get("src")
+                        elif isinstance(th, str):
+                            thumb = th
+                        # اذا ما لقى صورة البث ياخذ البانر
+                        if not thumb:
+                            thumb = livestream.get("banner_image") or d.get("banner_image") or d.get("profile_pic")
+                        
+                        viewers = livestream.get("viewer_count", 0)
+                        cats = livestream.get("categories") or []
+                        category = cats[0].get("name") if cats and isinstance(cats[0], dict) else "Live"
+                        
+                        print(f"LIVE {slug}: {title} | {viewers} viewers")
+                        return {"is_live": True, "title": title, "thumb": thumb, "viewers": viewers, "category": category}
     except Exception as e:
         print(f"Error {slug}: {e}")
     return {"is_live": False}
@@ -55,15 +74,26 @@ async def checker():
             for g in bot.guilds:
                 ch=g.get_channel(target)
                 if ch: break
-        if not ch: continue
+        if not ch: 
+            continue
 
         if info["is_live"] and not was:
             live[slug]=True
             view = StreamView(slug, is_live=True)
+            
+            embed = discord.Embed(
+                title=f"🟢 {slug} فتح بث مباشر!",
+                description=f"**{info.get('title','بث مباشر')}**\n📁 {info.get('category','Live')} | 👀 {info.get('viewers',0)} مشاهد",
+                color=0x00FF00
+            )
+            if info.get('thumb'):
+                embed.set_image(url=info.get('thumb'))
+            embed.set_footer(text="Kick.com • بث مباشر الآن")
+            
             try:
-                msg = await ch.send(f"<@&{ROLE_PING}> 🟢 **{slug}** فتح\nhttps://kick.com/{slug}", view=view)
+                msg = await ch.send(content=f"<@&{ROLE_PING}> 🟢 **{slug}** فتح\nhttps://kick.com/{slug}", embed=embed, view=view)
                 live_messages[slug] = {"id": msg.id, "ch": ch.id}
-                print(f"SENT {slug} LIVE")
+                print(f"SENT {slug} WITH IMAGE")
             except Exception as e:
                 print(f"Send fail {slug}: {e}")
 
@@ -75,9 +105,20 @@ async def checker():
                     old_ch = bot.get_channel(data["ch"]) or await bot.fetch_channel(data["ch"])
                     msg = await old_ch.fetch_message(data["id"])
                     view = StreamView(slug, is_live=False)
-                    await msg.edit(content=f"🔴 **{slug}** انتهى البث - شاهد التسجيل\nhttps://kick.com/{slug}", view=view)
+                    
+                    embed = discord.Embed(
+                        title=f"🔴 {slug} أنهى البث",
+                        description="البث انتهى - تقدر تشوف التسجيل الآن 👇",
+                        color=0xFF0000
+                    )
+                    if msg.embeds and msg.embeds[0].image:
+                        embed.set_image(url=msg.embeds[0].image.url)
+                    embed.set_footer(text="Kick.com • التسجيل متاح")
+                    
+                    await msg.edit(content=f"🔴 **{slug}** انتهى البث - شاهد التسجيل\nhttps://kick.com/{slug}", embed=embed, view=view)
                     print(f"EDITED {slug} TO VOD")
-                except: pass
+                except Exception as e:
+                    print(f"Edit fail {slug}: {e}")
 
 @bot.event
 async def on_ready():
@@ -89,13 +130,16 @@ async def on_ready():
             await bot.tree.sync(guild=g)
             await bot.http.bulk_overwrite_guild_application_commands(bot.application_id, g.id, [])
         await bot.http.bulk_overwrite_global_application_commands(bot.application_id, [])
-    except: pass
+        print("DELETED SLASH COMMANDS")
+    except Exception as e:
+        print(e)
     if not checker.is_running():
         checker.start()
-    print(f"✅ READY {bot.user}")
+    print(f"✅ READY {bot.user} - With Image Support")
 
 def owner_only():
-    def pred(ctx): return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
+    def pred(ctx):
+        return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
     return commands.check(pred)
 
 @bot.command(name="كلاش")
@@ -104,13 +148,19 @@ async def clash(ctx, رابط: str = None):
     if not رابط: return
     slug=رابط.split("kick.com/")[-1].split("/")[0].lower()
     info=await get_kick(slug)
-    await ctx.send(f"{slug} {'لايف' if info['is_live'] else 'اوفلاين'}", delete_after=10)
+    if info["is_live"]:
+        embed = discord.Embed(title=f"🟢 {slug} لايف", description=info.get('title'), color=0x00FF00)
+        if info.get('thumb'): embed.set_image(url=info.get('thumb'))
+        await ctx.send(embed=embed, delete_after=30)
+    else:
+        await ctx.send(f"{slug} 🔴 اوفلاين", delete_after=10)
     try: await ctx.message.delete()
     except: pass
 
 @bot.command(name="فحص_الان")
 @owner_only()
 async def f7s(ctx):
+    await ctx.send("🔍 جاري الفحص مع الصور...", delete_after=5)
     for slug in ALL:
         info=await get_kick(slug)
         if info["is_live"] and not live.get(slug):
@@ -118,7 +168,9 @@ async def f7s(ctx):
             ch=bot.get_channel(ROOM_RT if slug in STREAMERS_RT else ROOM_MT)
             if ch:
                 view = StreamView(slug, is_live=True)
-                msg = await ch.send(f"<@&{ROLE_PING}> 🟢 **{slug}** فتح\nhttps://kick.com/{slug}", view=view)
+                embed = discord.Embed(title=f"🟢 {slug} فتح بث مباشر!", description=f"{info.get('title')} | 👀 {info.get('viewers')} مشاهد", color=0x00FF00)
+                if info.get('thumb'): embed.set_image(url=info.get('thumb'))
+                msg = await ch.send(content=f"<@&{ROLE_PING}> 🟢 **{slug}** فتح\nhttps://kick.com/{slug}", embed=embed, view=view)
                 live_messages[slug] = {"id": msg.id, "ch": ch.id}
     try: await ctx.message.delete()
     except: pass
@@ -132,6 +184,6 @@ async def on_command_error(ctx, err):
 
 app=Flask('')
 @app.route('/')
-def h(): return "Kick Bot Fixed"
+def h(): return "Kick Bot With Image + Button Online"
 threading.Thread(target=lambda: app.run(host='0.0.0.0',port=8080),daemon=True).start()
 bot.run(TOKEN)
