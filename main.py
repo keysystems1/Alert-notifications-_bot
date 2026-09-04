@@ -20,6 +20,17 @@ intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 live = {}
+live_messages = {} # slug -> {message_id, channel_id}
+
+class StreamView(discord.ui.View):
+    def __init__(self, slug, is_live=True):
+        super().__init__(timeout=None)
+        url = f"https://kick.com/{slug}"
+        if is_live:
+            btn = discord.ui.Button(label="فتح البث", style=discord.ButtonStyle.link, url=url, emoji="🟢")
+        else:
+            btn = discord.ui.Button(label="شاهد التسجيل", style=discord.ButtonStyle.link, url=url, emoji="🎥")
+        self.add_item(btn)
 
 async def get_kick(slug):
     try:
@@ -27,32 +38,56 @@ async def get_kick(slug):
             async with s.get(f"https://kick.com/api/v2/channels/{slug}", timeout=8) as r:
                 if r.status==200:
                     d=await r.json()
-                    return {"is_live": d.get("livestream") is not None}
+                    livestream = d.get("livestream")
+                    is_live = livestream is not None
+                    title = livestream.get("session_title") if livestream else None
+                    thumb = d.get("banner_image") or d.get("profile_pic")
+                    return {"is_live": is_live, "title": title, "thumb": thumb}
     except: pass
-    return {"is_live": False}
+    return {"is_live": False, "title": None, "thumb": None}
+
+def get_target_room(slug):
+    return ROOM_RT if slug in STREAMERS_RT else ROOM_MT
 
 @tasks.loop(seconds=30)
 async def checker():
     for slug in ALL:
         info = await get_kick(slug)
-        was = live.get(slug, False)
-        target = ROOM_RT if slug in STREAMERS_RT else ROOM_MT
-        if info["is_live"] and not was:
-            live[slug]=True
-            ch=bot.get_channel(target)
-            if not ch:
-                for g in bot.guilds:
-                    ch=g.get_channel(target)
-                    if ch: break
-            if ch:
-                try: await ch.send(f"<@&{ROLE_PING}> 🟢 **{slug}** فتح https://kick.com/{slug}")
+        was_live = live.get(slug, False)
+        target = get_target_room(slug)
+        ch = bot.get_channel(target)
+        if not ch:
+            for g in bot.guilds:
+                ch = g.get_channel(target)
+                if ch: break
+        if not ch: continue
+
+        if info["is_live"] and not was_live:
+            live[slug] = True
+            embed = discord.Embed(title=f"🟢 {slug} فتح بث مباشر!", description=f"**{info['title'] or 'بث مباشر الآن'}**\n\nاضغط الزر تحت عشان تفتح البث 👇", color=0x00FF00)
+            if info['thumb']: embed.set_thumbnail(url=info['thumb'])
+            embed.set_footer(text="Kick.com • بث مباشر")
+            view = StreamView(slug, is_live=True)
+            try:
+                msg = await ch.send(content=f"<@&{ROLE_PING}> 🟢 **{slug}** فتح لايف!", embed=embed, view=view)
+                live_messages[slug] = {"message_id": msg.id, "channel_id": ch.id}
+            except: pass
+        elif not info["is_live"] and was_live:
+            live[slug] = False
+            data = live_messages.get(slug)
+            if data:
+                try:
+                    old_ch = bot.get_channel(data["channel_id"]) or await bot.fetch_channel(data["channel_id"])
+                    msg = await old_ch.fetch_message(data["message_id"])
+                    embed = discord.Embed(title=f"🔴 {slug} أنهى البث", description="البث انتهى - تقدر تشوف التسجيل الآن 👇", color=0xFF0000)
+                    if info['thumb']: embed.set_thumbnail(url=info['thumb'])
+                    embed.set_footer(text="Kick.com • التسجيل متاح")
+                    view = StreamView(slug, is_live=False)
+                    await msg.edit(content=f"🔴 **{slug}** البث انتهى", embed=embed, view=view)
                 except: pass
-        elif not info["is_live"]:
-            live[slug]=False
 
 @bot.event
 async def on_ready():
-    # هذا اهم سطر - يمسح اللي في صورتك نهائيا
     try:
         bot.tree.clear_commands(guild=None)
         await bot.tree.sync()
@@ -61,15 +96,11 @@ async def on_ready():
             await bot.tree.sync(guild=g)
             await bot.http.bulk_overwrite_guild_application_commands(bot.application_id, g.id, [])
         await bot.http.bulk_overwrite_global_application_commands(bot.application_id, [])
-        print("DELETED /فحص_الان and /كلاش FOREVER")
-    except Exception as e:
-        print(e)
-    if not checker.is_running():
-        checker.start()
+    except: pass
+    if not checker.is_running(): checker.start()
 
 def owner_only():
-    def pred(ctx):
-        return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
+    def pred(ctx): return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
     return commands.check(pred)
 
 @bot.command(name="كلاش")
@@ -78,18 +109,24 @@ async def clash(ctx, رابط: str = None):
     if not رابط: return
     slug=رابط.split("kick.com/")[-1].split("/")[0].lower()
     info=await get_kick(slug)
-    await ctx.send(f"{slug} {'لايف' if info['is_live'] else 'اوفلاين'}", delete_after=10)
+    await ctx.send(f"{slug} {'🟢 لايف الآن' if info['is_live'] else '🔴 اوفلاين'}", delete_after=10)
     try: await ctx.message.delete()
     except: pass
 
 @bot.command(name="فحص_الان")
 @owner_only()
 async def f7s(ctx):
+    await ctx.send("🔍 جاري فحص كل الستريمرز...", delete_after=5)
     for slug in ALL:
         info=await get_kick(slug)
-        if info["is_live"]:
-            ch=bot.get_channel(ROOM_RT if slug in STREAMERS_RT else ROOM_MT)
-            if ch: await ch.send(f"<@&{ROLE_PING}> 🟢 **{slug}** https://kick.com/{slug}")
+        if info["is_live"] and not live.get(slug):
+            live[slug]=True
+            ch=bot.get_channel(get_target_room(slug))
+            if ch:
+                embed = discord.Embed(title=f"🟢 {slug} فتح بث مباشر!", description=info['title'] or "بث مباشر الآن", color=0x00FF00)
+                view = StreamView(slug, is_live=True)
+                msg = await ch.send(content=f"<@&{ROLE_PING}> 🟢 **{slug}**", embed=embed, view=view)
+                live_messages[slug] = {"message_id": msg.id, "channel_id": ch.id}
     try: await ctx.message.delete()
     except: pass
 
@@ -102,6 +139,6 @@ async def on_command_error(ctx, err):
 
 app=Flask('')
 @app.route('/')
-def h(): return "No slash"
+def h(): return "Kick Bot With Buttons Online"
 threading.Thread(target=lambda: app.run(host='0.0.0.0',port=8080),daemon=True).start()
 bot.run(TOKEN)
