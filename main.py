@@ -39,24 +39,18 @@ async def get_kick(slug):
                     d=await r.json()
                     livestream = d.get("livestream")
                     if livestream:
-                        # العنوان
-                        title = livestream.get("session_title") or d.get("channel", {}).get("name") or "بث مباشر"
-                        # صورة البث - اهم شي
+                        title = livestream.get("session_title") or "بث مباشر"
                         thumb = None
                         th = livestream.get("thumbnail")
                         if isinstance(th, dict):
                             thumb = th.get("url") or th.get("src")
                         elif isinstance(th, str):
                             thumb = th
-                        # اذا ما لقى صورة البث ياخذ البانر
                         if not thumb:
                             thumb = livestream.get("banner_image") or d.get("banner_image") or d.get("profile_pic")
-                        
                         viewers = livestream.get("viewer_count", 0)
                         cats = livestream.get("categories") or []
                         category = cats[0].get("name") if cats and isinstance(cats[0], dict) else "Live"
-                        
-                        print(f"LIVE {slug}: {title} | {viewers} viewers")
                         return {"is_live": True, "title": title, "thumb": thumb, "viewers": viewers, "category": category}
     except Exception as e:
         print(f"Error {slug}: {e}")
@@ -68,19 +62,16 @@ async def checker():
         info = await get_kick(slug)
         was = live.get(slug, False)
         target = ROOM_RT if slug in STREAMERS_RT else ROOM_MT
-
         ch = bot.get_channel(target)
         if not ch:
             for g in bot.guilds:
                 ch=g.get_channel(target)
                 if ch: break
-        if not ch: 
-            continue
+        if not ch: continue
 
         if info["is_live"] and not was:
             live[slug]=True
             view = StreamView(slug, is_live=True)
-            
             embed = discord.Embed(
                 title=f"🟢 {slug} فتح بث مباشر!",
                 description=f"**{info.get('title','بث مباشر')}**\n📁 {info.get('category','Live')} | 👀 {info.get('viewers',0)} مشاهد",
@@ -89,13 +80,10 @@ async def checker():
             if info.get('thumb'):
                 embed.set_image(url=info.get('thumb'))
             embed.set_footer(text="Kick.com • بث مباشر الآن")
-            
             try:
                 msg = await ch.send(content=f"<@&{ROLE_PING}> 🟢 **{slug}** فتح\nhttps://kick.com/{slug}", embed=embed, view=view)
                 live_messages[slug] = {"id": msg.id, "ch": ch.id}
-                print(f"SENT {slug} WITH IMAGE")
-            except Exception as e:
-                print(f"Send fail {slug}: {e}")
+            except: pass
 
         elif not info["is_live"] and was:
             live[slug]=False
@@ -105,20 +93,12 @@ async def checker():
                     old_ch = bot.get_channel(data["ch"]) or await bot.fetch_channel(data["ch"])
                     msg = await old_ch.fetch_message(data["id"])
                     view = StreamView(slug, is_live=False)
-                    
-                    embed = discord.Embed(
-                        title=f"🔴 {slug} أنهى البث",
-                        description="البث انتهى - تقدر تشوف التسجيل الآن 👇",
-                        color=0xFF0000
-                    )
+                    embed = discord.Embed(title=f"🔴 {slug} أنهى البث", description="البث انتهى - تقدر تشوف التسجيل الآن 👇", color=0xFF0000)
                     if msg.embeds and msg.embeds[0].image:
                         embed.set_image(url=msg.embeds[0].image.url)
                     embed.set_footer(text="Kick.com • التسجيل متاح")
-                    
                     await msg.edit(content=f"🔴 **{slug}** انتهى البث - شاهد التسجيل\nhttps://kick.com/{slug}", embed=embed, view=view)
-                    print(f"EDITED {slug} TO VOD")
-                except Exception as e:
-                    print(f"Edit fail {slug}: {e}")
+                except: pass
 
 @bot.event
 async def on_ready():
@@ -130,16 +110,13 @@ async def on_ready():
             await bot.tree.sync(guild=g)
             await bot.http.bulk_overwrite_guild_application_commands(bot.application_id, g.id, [])
         await bot.http.bulk_overwrite_global_application_commands(bot.application_id, [])
-        print("DELETED SLASH COMMANDS")
-    except Exception as e:
-        print(e)
+    except: pass
     if not checker.is_running():
         checker.start()
-    print(f"✅ READY {bot.user} - With Image Support")
+    print(f"✅ READY {bot.user}")
 
 def owner_only():
-    def pred(ctx):
-        return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
+    def pred(ctx): return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
     return commands.check(pred)
 
 @bot.command(name="كلاش")
