@@ -20,8 +20,9 @@ intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 live = {}
-live_messages = {} # slug -> {message_id, channel_id}
+live_messages = {}  # slug -> {message_id, channel_id}
 
+# زر فتح البث / شاهد التسجيل
 class StreamView(discord.ui.View):
     def __init__(self, slug, is_live=True):
         super().__init__(timeout=None)
@@ -43,7 +44,8 @@ async def get_kick(slug):
                     title = livestream.get("session_title") if livestream else None
                     thumb = d.get("banner_image") or d.get("profile_pic")
                     return {"is_live": is_live, "title": title, "thumb": thumb}
-    except: pass
+    except Exception as e:
+        print(f"Error {slug}: {e}")
     return {"is_live": False, "title": None, "thumb": None}
 
 def get_target_room(slug):
@@ -55,6 +57,8 @@ async def checker():
         info = await get_kick(slug)
         was_live = live.get(slug, False)
         target = get_target_room(slug)
+        
+        # لقى روم
         ch = bot.get_channel(target)
         if not ch:
             for g in bot.guilds:
@@ -62,16 +66,27 @@ async def checker():
                 if ch: break
         if not ch: continue
 
+        # فتح بث جديد
         if info["is_live"] and not was_live:
             live[slug] = True
-            embed = discord.Embed(title=f"🟢 {slug} فتح بث مباشر!", description=f"**{info['title'] or 'بث مباشر الآن'}**\n\nاضغط الزر تحت عشان تفتح البث 👇", color=0x00FF00)
-            if info['thumb']: embed.set_thumbnail(url=info['thumb'])
+            embed = discord.Embed(
+                title=f"🟢 {slug} فتح بث مباشر!",
+                description=f"**{info['title'] or 'بث مباشر الآن'}**\n\nاضغط الزر تحت عشان تفتح البث 👇",
+                color=0x00FF00
+            )
+            if info['thumb']:
+                embed.set_thumbnail(url=info['thumb'])
             embed.set_footer(text="Kick.com • بث مباشر")
+            
             view = StreamView(slug, is_live=True)
             try:
                 msg = await ch.send(content=f"<@&{ROLE_PING}> 🟢 **{slug}** فتح لايف!", embed=embed, view=view)
                 live_messages[slug] = {"message_id": msg.id, "channel_id": ch.id}
-            except: pass
+                print(f"LIVE {slug} -> {msg.id}")
+            except Exception as e:
+                print(f"Send error {slug}: {e}")
+
+        # انتهى البث - عدل الرسالة ل "شاهد التسجيل"
         elif not info["is_live"] and was_live:
             live[slug] = False
             data = live_messages.get(slug)
@@ -79,12 +94,22 @@ async def checker():
                 try:
                     old_ch = bot.get_channel(data["channel_id"]) or await bot.fetch_channel(data["channel_id"])
                     msg = await old_ch.fetch_message(data["message_id"])
-                    embed = discord.Embed(title=f"🔴 {slug} أنهى البث", description="البث انتهى - تقدر تشوف التسجيل الآن 👇", color=0xFF0000)
-                    if info['thumb']: embed.set_thumbnail(url=info['thumb'])
+                    
+                    embed = discord.Embed(
+                        title=f"🔴 {slug} أنهى البث",
+                        description=f"البث انتهى - تقدر تشوف التسجيل الآن 👇",
+                        color=0xFF0000
+                    )
+                    if info['thumb']:
+                        embed.set_thumbnail(url=info['thumb'])
                     embed.set_footer(text="Kick.com • التسجيل متاح")
+                    
                     view = StreamView(slug, is_live=False)
                     await msg.edit(content=f"🔴 **{slug}** البث انتهى", embed=embed, view=view)
-                except: pass
+                    print(f"VOD {slug} -> edited")
+                except Exception as e:
+                    print(f"Edit error {slug}: {e}")
+            # اذا ما لقينا الرسالة القديمة، لا ترسل شي جديد
 
 @bot.event
 async def on_ready():
@@ -96,11 +121,16 @@ async def on_ready():
             await bot.tree.sync(guild=g)
             await bot.http.bulk_overwrite_guild_application_commands(bot.application_id, g.id, [])
         await bot.http.bulk_overwrite_global_application_commands(bot.application_id, [])
-    except: pass
-    if not checker.is_running(): checker.start()
+        print("DELETED SLASH COMMANDS FOREVER")
+    except Exception as e:
+        print(e)
+    if not checker.is_running():
+        checker.start()
+    print(f"✅ Kick Bot Ready - {bot.user}")
 
 def owner_only():
-    def pred(ctx): return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
+    def pred(ctx):
+        return any(r.id == OWNER_ROLE for r in ctx.author.roles) if ctx.guild else False
     return commands.check(pred)
 
 @bot.command(name="كلاش")
